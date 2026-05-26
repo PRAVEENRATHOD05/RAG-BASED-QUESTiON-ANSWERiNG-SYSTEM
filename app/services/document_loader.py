@@ -4,13 +4,15 @@ import logging
 from pathlib import Path
 
 from app.models.entities import LoadedDocument
+from app.services.text_cleaner import TextCleaner
 
 logger = logging.getLogger(__name__)
 
 
 class DocumentLoader:
-    def __init__(self, allowed_extensions: tuple[str, ...]) -> None:
+    def __init__(self, allowed_extensions: tuple[str, ...], cleaner: TextCleaner | None = None) -> None:
         self.allowed_extensions = {ext.lower() for ext in allowed_extensions}
+        self.cleaner = cleaner or TextCleaner()
 
     def discover_files(self, source_dir: Path, recursive: bool = True) -> list[Path]:
         if not source_dir.exists():
@@ -28,31 +30,37 @@ class DocumentLoader:
 
     def load_file(self, file_path: Path) -> LoadedDocument:
         extension = file_path.suffix.lower()
+        metadata: dict[str, object] = {
+            "extension": extension,
+            "filename": file_path.name,
+            "size_bytes": file_path.stat().st_size,
+            "source_filename": file_path.name,
+        }
 
-        if extension == ".txt" or extension == ".md":
-            text = file_path.read_text(encoding="utf-8", errors="ignore")
+        if extension in {".txt", ".md"}:
+            raw_text = file_path.read_text(encoding="utf-8", errors="ignore")
+            text = self.cleaner.clean(raw_text)
         elif extension == ".pdf":
-            text = self._read_pdf(file_path)
+            pages = self._read_pdf_pages(file_path)
+            text, page_map = self._merge_pages(pages)
+            metadata["page_count"] = len(page_map)
+            metadata["page_map"] = page_map
         elif extension == ".docx":
-            text = self._read_docx(file_path)
+            raw_text = self._read_docx(file_path)
+            text = self.cleaner.clean(raw_text)
         else:
             raise ValueError(f"Unsupported file type: {extension}")
 
-        cleaned = text.replace("\x00", " ").strip()
-        if not cleaned:
+        if not text:
             raise ValueError(f"No readable text found in {file_path.name}")
 
         return LoadedDocument(
             source=str(file_path),
-            text=cleaned,
-            metadata={
-                "extension": extension,
-                "filename": file_path.name,
-                "size_bytes": file_path.stat().st_size,
-            },
+            text=text,
+            metadata=metadata,
         )
 
-    def _read_pdf(self, file_path: Path) -> str:
+    def _read_pdf_pages(self, file_path: Path) -> list[str]:
         try:
             from pypdf import PdfReader
         except ImportError as exc:
@@ -63,8 +71,10 @@ class DocumentLoader:
         reader = PdfReader(str(file_path))
         pages: list[str] = []
         for page in reader.pages:
-            pages.append(page.extract_text() or "")
-        return "\n".join(pages)
+            page_text = page.extract_text() or ""
+            cleaned_page = self.cleaner.clean(page_text)
+            pages.append(cleaned_page)
+        return pages
 
     def _read_docx(self, file_path: Path) -> str:
         try:
@@ -77,4 +87,32 @@ class DocumentLoader:
         doc = Document(str(file_path))
         paragraphs = [paragraph.text for paragraph in doc.paragraphs]
         return "\n".join(paragraphs)
+
+    def _merge_pages(self, pages: list[str]) -> tuple[str, list[dict[str, int]]]:
+        merged_parts: list[str] = []
+        page_map: list[dict[str, int]] = []
+        cursor = 0
+
+        for page_index, page_text in enumerate(pages, start=1):
+            normalized_page = page_text.strip()
+            if not normalized_page:
+                continue
+
+            if merged_parts:
+                merged_parts.append("\n\n")
+                cursor += 2
+
+            start_char = cursor
+            merged_parts.append(normalized_page)
+            cursor += len(normalized_page)
+            end_char = cursor
+            page_map.append(
+                {
+                    "page_number": page_index,
+                    "start_char": start_char,
+                    "end_char": end_char,
+                }
+            )
+
+        return "".join(merged_parts).strip(), page_map
 

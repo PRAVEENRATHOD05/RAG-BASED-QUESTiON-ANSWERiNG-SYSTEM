@@ -11,13 +11,16 @@ from app.services.answer_generator import build_answer_generator
 from app.services.chunker import TextChunker
 from app.services.document_loader import DocumentLoader
 from app.services.embeddings import create_embedding_provider
+from app.services.retrieval import HybridRetriever
+from app.services.text_cleaner import TextCleaner
 from app.services.vector_store import LocalVectorStore
 
 
 class RagService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.loader = DocumentLoader(settings.allowed_extensions)
+        self.cleaner = TextCleaner()
+        self.loader = DocumentLoader(settings.allowed_extensions, cleaner=self.cleaner)
         self.chunker = TextChunker(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
@@ -28,6 +31,11 @@ class RagService:
         )
         self.vector_store = LocalVectorStore(index_dir=settings.index_dir)
         self.vector_store.load()
+        self.retriever = HybridRetriever(
+            vector_store=self.vector_store,
+            vector_weight=settings.hybrid_vector_weight,
+            lexical_weight=settings.hybrid_lexical_weight,
+        )
         self.answer_generator = build_answer_generator(
             use_openai=settings.allow_openai_generation,
             openai_api_key=settings.openai_api_key,
@@ -71,13 +79,31 @@ class RagService:
         return report
 
     def query(self, question: str, top_k: int | None = None) -> tuple[str, list[SearchHit]]:
+        question = self.cleaner.clean(question)
+        if not question:
+            return (
+                "Answer:\nI could not find that information in the uploaded document.\n\n"
+                "Confidence:\nLow\n\n"
+                "Sources:\n- Not available",
+                [],
+            )
+
         limit = top_k or self.settings.top_k
+        limit = max(1, min(limit, 20))
         query_vector = self.embedding_provider.embed_query(question)
-        hits = self.vector_store.search(
+        hits = self.retriever.retrieve(
+            question=question,
             query_vector=query_vector,
             top_k=limit,
             min_score=self.settings.score_threshold,
         )
+        if not hits:
+            hits = self.retriever.retrieve(
+                question=question,
+                query_vector=query_vector,
+                top_k=limit,
+                min_score=0.0,
+            )
         answer = self.answer_generator.generate(question=question, hits=hits)
         return answer, hits
 

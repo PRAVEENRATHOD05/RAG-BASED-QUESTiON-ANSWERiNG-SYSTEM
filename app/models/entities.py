@@ -46,4 +46,6 @@ class DocumentChunk:
 class SearchHit:
     chunk: DocumentChunk
     score: float
+    vector_score: float = 0.0
+    lexical_score: float = 0.0
 

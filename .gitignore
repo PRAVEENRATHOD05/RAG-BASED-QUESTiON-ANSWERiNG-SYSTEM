@@ -8,6 +8,9 @@ venv/
 .DS_Store
 
 .env
+frontend/.env
+frontend/node_modules/
+frontend/dist/
 data/processed/*
 !data/processed/.gitkeep
 data/vector_store/*

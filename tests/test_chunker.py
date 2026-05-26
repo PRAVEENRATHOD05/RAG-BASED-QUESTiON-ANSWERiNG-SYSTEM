@@ -18,3 +18,32 @@ def test_chunker_splits_and_preserves_overlap() -> None:
     assert chunks[1].start_char < chunks[0].end_char
     assert len({chunk.id for chunk in chunks}) == len(chunks)
 
+
+def test_chunker_preserves_section_and_page_metadata() -> None:
+    doc_text = (
+        "SUMMARY\n"
+        "AI engineer building retrieval systems.\n\n"
+        "SKILLS\n"
+        "Python, FastAPI, Retrieval, Vector Search.\n\n"
+        "PROJECTS\n"
+        "Built a resume assistant with confidence scoring and source tracing."
+    )
+    document = LoadedDocument(
+        source="resume.pdf",
+        text=doc_text,
+        metadata={
+            "filename": "resume.pdf",
+            "page_map": [
+                {"page_number": 1, "start_char": 0, "end_char": len(doc_text)},
+            ],
+        },
+    )
+
+    chunker = TextChunker(chunk_size=90, chunk_overlap=20)
+    chunks = chunker.split_document(document)
+
+    assert chunks
+    assert all("section_name" in chunk.metadata for chunk in chunks)
+    assert all(chunk.metadata.get("page_number") == 1 for chunk in chunks)
+    assert any(chunk.metadata.get("section_name") == "Skills" for chunk in chunks)
+

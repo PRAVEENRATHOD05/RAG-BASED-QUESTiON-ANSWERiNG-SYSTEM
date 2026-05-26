@@ -22,11 +22,15 @@ In simple words:
 ## Features
 
 - Multi-format document ingestion: `.txt`, `.md`, `.pdf`, `.docx`
-- Configurable chunking with overlap for context continuity
+- Browser-based file upload + auto-ingest via React UI
+- OCR/PDF text cleaning and unicode normalization
+- Section-aware semantic chunking with overlap
+- Chunk metadata enrichment: filename, section, page number
 - Pluggable embedding backends
 - Local persistent vector store
-- Semantic retrieval with similarity scoring
-- Grounded answer generation with source snippets
+- Hybrid retrieval (vector + lexical) with reranking and deduplication
+- Recruiter-ready grounded answer generation with confidence scoring
+- Structured source attribution (`filename`, `section`, `page`)
 - REST API for ingestion, querying, stats, and index reset
 - Unit and API smoke tests
 
@@ -65,6 +69,10 @@ app/
   main.py
 scripts/
   ingest_docs.py            # CLI ingestion utility
+frontend/
+  src/
+    App.jsx                 # React Q&A dashboard
+    styles.css              # Modern responsive UI theme
 tests/
 data/
   raw/                      # Put source docs here
@@ -128,6 +136,30 @@ Sample payload:
 }
 ```
 
+### 8) Run the React UI
+
+In a second terminal (keep backend running):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open:
+
+`http://127.0.0.1:5173`
+
+Optional: create `frontend/.env` from `frontend/.env.example` and set `VITE_API_BASE_URL` if your API is not on `http://127.0.0.1:8000`.
+
+The UI includes:
+- Query panel with answer + source snippets
+- Upload + ingest controls
+- Index stats + reset actions
+- `Source Directory` expects a folder path (not a terminal command)
+
+After upgrading ingestion/chunking logic, run `DELETE /api/v1/index` once and ingest again so new metadata (`section_name`, `page_number`) is applied to all chunks.
+
 ---
 
 ## API Reference
@@ -136,6 +168,8 @@ Sample payload:
   - Service health check
 - `POST /api/v1/ingest`
   - Ingest and index documents
+- `POST /api/v1/upload`
+  - Upload files (`multipart/form-data`) and optionally ingest immediately
 - `POST /api/v1/query`
   - Ask a question against indexed documents
 - `GET /api/v1/index/stats`
@@ -163,6 +197,19 @@ curl -X POST "http://127.0.0.1:8000/api/v1/query" ^
   -d "{\"question\":\"How many remote days are allowed each week?\"}"
 ```
 
+Query responses include:
+- structured answer block (`Answer`, `Confidence`, `Sources`)
+- cleaned source snippets
+- source metadata: `filename`, `section_name`, `page_number`, `score`, `vector_score`, `lexical_score`
+
+### Upload and ingest a local file
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/upload" ^
+  -F "files=@data/raw/sample_company_handbook.md" ^
+  -F "ingest_after_upload=true"
+```
+
 ---
 
 ## CLI Utility
@@ -182,8 +229,11 @@ Main knobs in `.env`:
 - `CHUNK_SIZE` - characters per chunk
 - `CHUNK_OVERLAP` - overlap between consecutive chunks
 - `TOP_K` - number of retrieved chunks
-- `SCORE_THRESHOLD` - minimum similarity score
+- `SCORE_THRESHOLD` - minimum blended relevance score for retrieval
 - `EMBEDDING_BACKEND` - `hashing` or `sentence-transformers`
+- `HYBRID_VECTOR_WEIGHT` - vector relevance weight in hybrid retrieval
+- `HYBRID_LEXICAL_WEIGHT` - lexical (BM25-style) relevance weight in hybrid retrieval
+- `CORS_ALLOW_ORIGINS` - comma-separated frontend origins (for React dev server, etc.)
 - `ALLOW_OPENAI_GENERATION` - `true/false`
 - `OPENAI_API_KEY` and `OPENAI_MODEL` (if OpenAI generation is enabled)
 

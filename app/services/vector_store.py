@@ -134,8 +134,41 @@ class LocalVectorStore:
             score = float(scores[idx])
             if score < min_score:
                 continue
-            hits.append(SearchHit(chunk=self._chunks[int(idx)], score=score))
+            hits.append(
+                SearchHit(
+                    chunk=self._chunks[int(idx)],
+                    score=score,
+                    vector_score=score,
+                    lexical_score=0.0,
+                )
+            )
         return hits
+
+    def score_all(self, query_vector: np.ndarray) -> list[tuple[DocumentChunk, float]]:
+        self._ensure_loaded()
+        if self._embeddings.size == 0:
+            return []
+
+        vector = np.asarray(query_vector, dtype=np.float32)
+        if vector.ndim != 1:
+            raise ValueError("Query vector must be 1D.")
+        if vector.shape[0] != self._embeddings.shape[1]:
+            raise ValueError(
+                f"Query dimension mismatch: got {vector.shape[0]}, "
+                f"expected {self._embeddings.shape[1]}"
+            )
+
+        norm = np.linalg.norm(vector)
+        if norm > 0:
+            vector = vector / norm
+
+        scores = self._embeddings @ vector
+        ranking = np.argsort(scores)[::-1]
+        return [(self._chunks[int(idx)], float(scores[idx])) for idx in ranking]
+
+    def all_chunks(self) -> list[DocumentChunk]:
+        self._ensure_loaded()
+        return list(self._chunks)
 
     def stats(self) -> dict[str, int]:
         self._ensure_loaded()

@@ -21,6 +21,14 @@ class IngestResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class UploadDocumentsResponse(BaseModel):
+    uploaded_files: int
+    saved_to: str
+    saved_files: list[str] = Field(default_factory=list)
+    skipped_files: list[str] = Field(default_factory=list)
+    ingest_report: IngestResponse | None = None
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=3, max_length=4000)
     top_k: int | None = Field(default=None, ge=1, le=20)
@@ -28,7 +36,12 @@ class QueryRequest(BaseModel):
 
 class SourceSnippet(BaseModel):
     source: str
+    filename: str
+    section_name: str
+    page_number: int | None = None
     score: float
+    vector_score: float | None = None
+    lexical_score: float | None = None
     excerpt: str
     start_char: int
     end_char: int

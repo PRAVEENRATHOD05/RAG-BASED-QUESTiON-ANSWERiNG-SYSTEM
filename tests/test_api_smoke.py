@@ -42,4 +42,53 @@ def test_ingest_and_query_flow(tmp_path: Path) -> None:
         query_payload = query_response.json()
         assert query_payload["retrieved_chunks"] >= 1
         assert query_payload["answer"]
+        assert "Answer:" in query_payload["answer"]
+        assert "Confidence:" in query_payload["answer"]
+        assert "Sources:" in query_payload["answer"]
+        first_source = query_payload["sources"][0]
+        assert "filename" in first_source
+        assert "section_name" in first_source
+        assert "vector_score" in first_source
+        assert "lexical_score" in first_source
+
+
+def test_upload_and_ingest_flow(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        raw_docs_dir=tmp_path / "data" / "raw",
+        processed_dir=tmp_path / "data" / "processed",
+        index_dir=tmp_path / "data" / "vector_store",
+        score_threshold=0.95,
+    )
+    settings.ensure_directories()
+
+    app = create_app(custom_settings=settings)
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/v1/upload",
+            data={"ingest_after_upload": "true", "recursive": "true"},
+            files={
+                "files": (
+                    "remote_policy.md",
+                    (
+                        "Remote Work Policy\n\nEmployees can work remotely "
+                        "up to three days per week."
+                    ).encode("utf-8"),
+                    "text/markdown",
+                )
+            },
+        )
+        assert upload_response.status_code == 200
+        upload_payload = upload_response.json()
+        assert upload_payload["uploaded_files"] == 1
+        assert upload_payload["ingest_report"]["files_processed"] == 1
+        stats_response = client.get("/api/v1/index/stats")
+        assert stats_response.status_code == 200
+        stats_payload = stats_response.json()
+        assert stats_payload["total_chunks"] >= 1
+
+        query_response = client.post("/api/v1/query", json={"question": "tell about remote policy"})
+        assert query_response.status_code == 200
+        query_payload = query_response.json()
+        assert query_payload["retrieved_chunks"] >= 1
 

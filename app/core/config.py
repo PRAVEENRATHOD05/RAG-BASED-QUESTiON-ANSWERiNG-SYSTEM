@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -26,10 +27,17 @@ class Settings(BaseSettings):
     chunk_overlap: int = 140
 
     top_k: int = 4
-    score_threshold: float = 0.18
+    score_threshold: float = 0.28
 
     embedding_backend: str = "hashing"
     embedding_dimension: int = 1536
+    hybrid_vector_weight: float = 0.68
+    hybrid_lexical_weight: float = 0.32
+
+    cors_allow_origins: tuple[str, ...] = (
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    )
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = "gpt-4.1-mini"
@@ -58,6 +66,27 @@ class Settings(BaseSettings):
         if normalized in falsy:
             return False
         return False
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return ()
+            if cleaned.startswith("["):
+                try:
+                    parsed = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    parsed = []
+                if isinstance(parsed, list):
+                    return tuple(str(origin).strip() for origin in parsed if str(origin).strip())
+            return tuple(origin.strip() for origin in cleaned.split(",") if origin.strip())
+        if isinstance(value, (list, tuple, set)):
+            return tuple(str(origin).strip() for origin in value if str(origin).strip())
+        return ()
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
